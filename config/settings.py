@@ -24,6 +24,7 @@ class LinkedInConfig:
     default_location: str = "India"
     max_jobs: int = 25
     scroll_pause: float = 1.5  # seconds to wait after each scroll
+    user_college: str | None = None
 
     # CSS selectors — update these if LinkedIn changes its markup
     selectors: Dict[str, str] = field(default_factory=lambda: {

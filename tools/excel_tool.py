@@ -32,6 +32,9 @@ def save_jobs_to_excel(jobs_data: list[dict], filename: str | None = None) -> st
     if 'url' in df.columns:
         df['url'] = df['url'].apply(lambda x: f'=HYPERLINK("{x}", "Click here to apply")')
 
+    if 'referral_url' in df.columns:
+        df['referral_url'] = df['referral_url'].apply(lambda x: f'=HYPERLINK("{x}", "Find Referrals")')
+
     # Make path absolute
     # By default, save in the current project root
     file_path = os.path.abspath(filename)
@@ -39,6 +42,6 @@ def save_jobs_to_excel(jobs_data: list[dict], filename: str | None = None) -> st
     try:
         # Save to Excel with openpyxl engine
         df.to_excel(file_path, index=False, engine='openpyxl')
-        return f"Successfully saved {len(jobs_data)} jobs to {file_path}"
+        return f"Successfully saved {len(jobs_data)} jobs with personalized referral messages to {file_path}"
     except Exception as e:
         return f"Error saving to Excel: {str(e)}"

@@ -12,6 +12,8 @@ class Job(BaseModel):
     url: str
     company: Optional[str] = None
     location: Optional[str] = None
+    referral_url: Optional[str] = None
+    referral_message: Optional[str] = None
 
 
 class JobSearchResult(BaseModel):

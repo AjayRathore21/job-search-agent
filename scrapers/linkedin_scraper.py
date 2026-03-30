@@ -46,6 +46,7 @@ class LinkedInScraper(BaseScraper):
         self,
         keywords: str | None = None,
         location: str | None = None,
+        college_name: str | None = None,
     ) -> JobSearchResult:
         """
         Scrape LinkedIn public job listings.
@@ -53,13 +54,14 @@ class LinkedInScraper(BaseScraper):
         Args:
             keywords: Job search query (default: 'full stack developer')
             location: Location filter  (default: 'India')
-
-        Returns:
-            JobSearchResult with list of Job objects
+            college_name: User's college name for alumni-based referrals
         """
         url = self.build_url(keywords, location)
         query = keywords or self.cfg.default_keywords
         logger.info(f"Scraping LinkedIn jobs → {url}")
+        
+        # Use provided college or the one from settings
+        my_college = college_name or self.cfg.user_college
 
         async with get_browser_page() as page:
             await page.goto(url, wait_until="domcontentloaded")
@@ -96,11 +98,32 @@ class LinkedInScraper(BaseScraper):
                     loc = (await location_el.inner_text()).strip() if await location_el.count() else None
 
                     if title and href:
+                        # Referral Link: Alumni search if college exists, else Recruiter search
+                        search_company = company or "Target Company"
+                        if my_college:
+                            # Search for people from my college at this company
+                            referral_search = f"https://www.linkedin.com/search/results/people/?keywords={str(my_college).replace(' ', '+')}+{search_company.replace(' ', '+')}"
+                            role_mention = "alumni"
+                        else:
+                            # Search for recruiters at this company
+                            referral_search = f"https://www.linkedin.com/search/results/people/?keywords=Technical+Recruiter+{search_company.replace(' ', '+')}"
+                            role_mention = "recruiter"
+
+                        # Generate a personalized message
+                        message = (
+                            f"Hi, I noticed the {title} role at {search_company}. "
+                            f"As a fellow {my_college or 'candidate'} with experience in this field, "
+                            "I would love to learn more about the team or potentially request a referral. "
+                            "Would you be open to a quick chat?"
+                        )
+
                         jobs.append(Job(
                             title=title,
                             url=href.split("?")[0],  # strip tracking params
                             company=company,
                             location=loc,
+                            referral_url=referral_search,
+                            referral_message=message
                         ))
                 except Exception as exc:
                     logger.debug(f"Skipping card {i}: {exc}")
