@@ -9,13 +9,21 @@ from langgraph.prebuilt import create_react_agent
 
 from tools.linkedin_tool import search_linkedin_jobs
 from tools.excel_tool import save_jobs_to_excel
+from tools.ats_tools import search_google_jobs, search_greenhouse_lever_jobs
+from tools.resume_tool import read_resume
 
 
 SYSTEM_PROMPT = (
-    "You are a helpful job search assistant. "
-    "When the user asks about jobs, use the search_linkedin_jobs tool to find listings. "
-    "If the user asks to save the results to a file or Excel, use the save_jobs_to_excel tool. "
-    "Present the results clearly, and if you saved a file, provide the full absolute path."
+    "You are a sophisticated Job Matcher & Search Agent. "
+    "Your workflow MUST be:"
+    "1. FIRST, use read_resume() to understand the user's background, skills, and experience. "
+    "2. Based on the resume, decide on the best keywords for searching jobs. "
+    "3. Use search_linkedin_jobs, search_google_jobs, or search_greenhouse_lever_jobs to find listings. "
+    "4. For EACH job found, compare its title and company with the resume content. "
+    "5. ONLY keep jobs that are at least an 80% match for the user's profile. "
+    "6. For each kept job, create a brief 'match_summary' (1 sentence) explaining why it's a good fit. "
+    "7. Finally, use save_jobs_to_excel to save ONLY the matching jobs. Include the 'match_summary' field. "
+    "\nPresent a summary of how many total jobs you found and how many were a good match."
 )
 
 
@@ -36,7 +44,13 @@ def create_job_search_agent():
         temperature=0,
     )
 
-    tools = [search_linkedin_jobs, save_jobs_to_excel]
+    tools = [
+        read_resume,
+        search_linkedin_jobs, 
+        save_jobs_to_excel, 
+        search_google_jobs, 
+        search_greenhouse_lever_jobs
+    ]
 
     agent = create_react_agent(
         model=llm,

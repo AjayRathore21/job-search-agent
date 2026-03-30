@@ -24,7 +24,7 @@ class LinkedInConfig:
     default_location: str = "India"
     max_jobs: int = 25
     scroll_pause: float = 1.5  # seconds to wait after each scroll
-    user_college: str | None = None
+    user_college: str | None = "Guru Jambheshwar University of Science and Technology"
 
     # CSS selectors — update these if LinkedIn changes its markup
     selectors: Dict[str, str] = field(default_factory=lambda: {
@@ -38,10 +38,31 @@ class LinkedInConfig:
 
 
 @dataclass
+class GoogleJobConfig:
+    """Settings for Google Job Search scraper."""
+    base_url: str = "https://www.google.com/search"
+    max_jobs: int = 15
+    selectors: Dict[str, str] = field(default_factory=lambda: {
+        "job_card": "div.iS7Hke",
+        "job_title": "div.BjS7Rb",
+        "job_company": "div.vNEEBe",
+        "job_location": "div.Q8Z6Ec",
+        "job_link": "a.M89U9e",
+    })
+
+@dataclass
+class GreenhouseConfig:
+    """Settings for Greenhouse ATS board searches."""
+    base_url: str = "https://boards.greenhouse.io/"
+    # Scrapers for ATS often target specific company boards
+
+@dataclass
 class Settings:
     """Root settings object."""
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     linkedin: LinkedInConfig = field(default_factory=LinkedInConfig)
+    google_jobs: GoogleJobConfig = field(default_factory=GoogleJobConfig)
+    greenhouse: GreenhouseConfig = field(default_factory=GreenhouseConfig)
 
 
 # Singleton settings instance used across the project
