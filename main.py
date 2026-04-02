@@ -28,7 +28,14 @@ def main():
     print(f"\n🔍 Query: {query}\n")
 
     agent = create_job_search_agent()
-    result = agent.invoke({"messages": [{"role": "user", "content": query}]})
+    
+    # LangGraph with Checkpointer needs a thread_id in the config
+    config = {"configurable": {"thread_id": "user_session_1"}}
+    
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": query}]},
+        config=config
+    )
 
     print("\n" + "=" * 60)
     print("📋 AGENT RESPONSE:")
@@ -36,10 +43,9 @@ def main():
 
     # Get the last AI message from the response
     messages = result.get("messages", [])
-    for msg in reversed(messages):
-        if hasattr(msg, "content") and msg.content and msg.type == "ai":
-            print(msg.content)
-            break
+    if messages:
+        last_msg = messages[-1]
+        print(last_msg.content)
 
 
 if __name__ == "__main__":

@@ -1,61 +1,110 @@
 """
-LangChain agent that uses the LinkedIn scraper tool.
-Uses LangGraph's prebuilt ReAct agent for tool-calling.
+LangGraph agent implementation with a custom StateGraph.
+Provides more control over the workflow and built-in persistence.
 """
 
 import os
+from typing import Annotated, TypedDict, Literal
+
 from langchain_openai import ChatOpenAI
-from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import BaseMessage, HumanMessage
+from langgraph.graph import StateGraph, END, START
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
+from langgraph.checkpoint.memory import MemorySaver
 
 from tools.linkedin_tool import search_linkedin_jobs
 from tools.excel_tool import save_jobs_to_excel
 from tools.ats_tools import search_google_jobs, search_greenhouse_lever_jobs
 from tools.resume_tool import read_resume
+from tools.scheduler_tool import schedule_cron_job, remove_cron_job, list_cron_jobs
+
+
+# 1. Define the state of our graph
+class AgentState(TypedDict):
+    # 'add_messages' ensures new messages are appended, not overwritten
+    messages: Annotated[list[BaseMessage], add_messages]
 
 
 SYSTEM_PROMPT = (
     "You are a sophisticated Job Matcher & Search Agent. "
-    "Your workflow MUST be:"
-    "1. FIRST, use read_resume() to understand the user's background, skills, and experience. "
-    "2. Based on the resume, decide on the best keywords for searching jobs. "
-    "3. Use search_linkedin_jobs, search_google_jobs, or search_greenhouse_lever_jobs to find listings. "
-    "4. For EACH job found, compare its title and company with the resume content. "
-    "5. ONLY keep jobs that are at least an 80% match for the user's profile. "
-    "6. For each kept job, create a brief 'match_summary' (1 sentence) explaining why it's a good fit. "
-    "7. Finally, use save_jobs_to_excel to save ONLY the matching jobs. Include the 'match_summary' field. "
-    "\nPresent a summary of how many total jobs you found and how many were a good match."
+    "Your current workflow is:"
+    "1. FIRST, use read_resume() to understand the user's background. "
+    "2. Based on the resume, search for matching jobs using available tools. "
+    "3. Save matching jobs (>= 80% match) to Excel using save_jobs_to_excel. "
+    "4. Manage background cron jobs: you can schedule, remove, or list them. "
+    "Example: 'Schedule a daily scrape at 9 AM' -> use schedule_cron_job."
+    "\nAlways provide a summary of your actions to the user."
 )
 
 
 def create_job_search_agent():
-    """Build and return the LangGraph ReAct agent."""
+    """Build and return a custom LangGraph StateGraph agent."""
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        raise EnvironmentError(
-            "Set the OPENROUTER_API_KEY environment variable in .env. "
-            "Get one at https://openrouter.ai/"
-        )
+        raise EnvironmentError("Set OPENROUTER_API_KEY in .env.")
 
-    llm = ChatOpenAI(
-        model="stepfun/step-3.5-flash",
-        openai_api_key=api_key,
-        openai_api_base="https://openrouter.ai/api/v1",
-        temperature=0,
-    )
-
+    # Tools available to the agent
     tools = [
         read_resume,
         search_linkedin_jobs, 
         save_jobs_to_excel, 
         search_google_jobs, 
-        search_greenhouse_lever_jobs
+        search_greenhouse_lever_jobs,
+        schedule_cron_job,
+        remove_cron_job,
+        list_cron_jobs
     ]
+    tool_node = ToolNode(tools)
 
-    agent = create_react_agent(
-        model=llm,
-        tools=tools,
-        prompt=SYSTEM_PROMPT,
+    # Initialize LLM and bind tools
+    llm = ChatOpenAI(
+        model=os.environ.get("CURRENT_LLM"),
+        openai_api_key=api_key,
+        openai_api_base="https://openrouter.ai/api/v1",
+        temperature=0,
+    ).bind_tools(tools)
+
+    # Define the core logic nodes
+    def call_model(state: AgentState):
+        messages = state["messages"]
+        # Inject system prompt if not present
+        if not any(isinstance(m, HumanMessage) for m in messages) or len(messages) == 1:
+            messages = [HumanMessage(content=SYSTEM_PROMPT)] + messages
+        response = llm.invoke(messages)
+        return {"messages": [response]}
+
+    # Define the edge logic (should we call tools or stop?)
+    def should_continue(state: AgentState) -> Literal["tools", END]:
+        last_message = state["messages"][-1]
+        if last_message.tool_calls:
+            return "tools"
+        return END
+
+    # Initialize the graph
+    workflow = StateGraph(AgentState)
+
+    # Add nodes
+    workflow.add_node("agent", call_model)
+    workflow.add_node("tools", tool_node)
+
+    # Set entry point
+    workflow.add_edge(START, "agent")
+
+    # Add conditional edge from agent to tools/END
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
     )
+
+    # Add fixed edge from tools back to agent
+    workflow.add_edge("tools", "agent")
+
+    # Add persistence (MemorySaver for now, can swap for Postgres/Sqlite later)
+    memory = MemorySaver()
+
+    # Compile the graph
+    agent = workflow.compile(checkpointer=memory)
 
     return agent
