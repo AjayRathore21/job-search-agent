@@ -28,10 +28,37 @@ if not scheduler.running:
     scheduler.start()
 
 def _dummy_job_func(task_name: str):
-    """Placeholder function that the cron job will actually execute."""
-    print(f"Executing scheduled task: {task_name} at {datetime.now()}")
-    # Here you would typically trigger the specific scraper or agent logic
-    # For now, it just logs.
+    """Function that the cron job executes to trigger the agent."""
+    # To avoid circular imports, import the agent creation inside the function
+    from agents.job_search_agent import create_job_search_agent
+    
+    print(f"\n[{datetime.now()}] 🔔 SCHEDULER TRIGGERED: Task '{task_name}' started!")
+    print(f"🤖 Booting up the LangGraph Agent to perform the background search...\n")
+
+    try:
+        agent = create_job_search_agent()
+        # Create an automated system prompt for the task
+        query = (
+            f"AUTOMATED JOB: The scheduled background task '{task_name}' has been triggered! "
+            f"Please execute a quick automated job search on LinkedIn for relevant roles and save to Excel. "
+            f"Do not ask the user for clarification. Use your tools immediately to finish the job."
+        )
+        
+        # Give this run a unique thread_id so it doesn't mess with the main user chat conversation
+        config = {"configurable": {"thread_id": f"cron_thread_{task_name}"}}
+        
+        result = agent.invoke(
+            {"messages": [{"role": "user", "content": query}]},
+            config=config
+        )
+        
+        messages = result.get("messages", [])
+        if messages:
+            last_msg = messages[-1].content
+            print(f"\n[{datetime.now()}] ✅ AGENT FINISHED TASK '{task_name}':\n{last_msg}\n")
+            
+    except Exception as e:
+        print(f"\n[{datetime.now()}] ❌ ERROR IN AGENT EXECUTION for '{task_name}': {e}\n")
 
 @tool
 def schedule_cron_job(task_name: str, hour: str, minute: str = "0", description: str = "") -> str:
