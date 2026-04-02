@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # Load .env file before anything else
 load_dotenv()
 
-from agents.job_search_agent import create_job_search_agent
+from agents.job_search_agent import trigger_agent
 
 # Configure logging
 logging.basicConfig(
@@ -27,25 +27,12 @@ def main():
 
     print(f"\n🔍 Query: {query}\n")
 
-    agent = create_job_search_agent()
-    
-    # LangGraph with Checkpointer needs a thread_id in the config
-    config = {"configurable": {"thread_id": "user_session_1"}}
-    
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": query}]},
-        config=config
-    )
+    last_msg = trigger_agent(query, "user_session_1")
 
     print("\n" + "=" * 60)
     print("📋 AGENT RESPONSE:")
     print("=" * 60)
-
-    # Get the last AI message from the response
-    messages = result.get("messages", [])
-    if messages:
-        last_msg = messages[-1]
-        print(last_msg.content)
+    print(last_msg)
 
 
 if __name__ == "__main__":

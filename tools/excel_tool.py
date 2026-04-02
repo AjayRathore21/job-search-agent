@@ -29,11 +29,18 @@ def save_jobs_to_excel(jobs_data: list[dict], filename: str | None = None) -> st
     df = pd.DataFrame(jobs_data)
 
     # Make URLs clickable in Excel using =HYPERLINK formula
+    if 'title' in df.columns:
+        df.rename(columns={'title': 'name'}, inplace=True)
+
     if 'url' in df.columns:
-        df['url'] = df['url'].apply(lambda x: f'=HYPERLINK("{x}", "Click here to apply")')
+        df['apply link'] = df['url'].apply(lambda x: f'=HYPERLINK("{x}", "Click here to apply")')
+        df.drop(columns=['url'], inplace=True)
 
     if 'referral_url' in df.columns:
-        df['referral_url'] = df['referral_url'].apply(lambda l: f'=HYPERLINK("{l}", "Find Referrals")')
+        df['linkedin referral'] = df['referral_url'].apply(
+            lambda l: f'=HYPERLINK("{l}", "Find Referrals")' if pd.notnull(l) and l != "" else ""
+        )
+        df.drop(columns=['referral_url'], inplace=True)
 
     # Make path absolute
     # By default, save in the current project root

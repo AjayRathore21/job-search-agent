@@ -29,14 +29,13 @@ if not scheduler.running:
 
 def _dummy_job_func(task_name: str):
     """Function that the cron job executes to trigger the agent."""
-    # To avoid circular imports, import the agent creation inside the function
-    from agents.job_search_agent import create_job_search_agent
+    # To avoid circular imports, import the agent trigger inside the function
+    from agents.job_search_agent import trigger_agent
     
     print(f"\n[{datetime.now()}] 🔔 SCHEDULER TRIGGERED: Task '{task_name}' started!")
     print(f"🤖 Booting up the LangGraph Agent to perform the background search...\n")
 
     try:
-        agent = create_job_search_agent()
         # Create an automated system prompt for the task
         query = (
             f"AUTOMATED JOB: The scheduled background task '{task_name}' has been triggered! "
@@ -44,18 +43,11 @@ def _dummy_job_func(task_name: str):
             f"Do not ask the user for clarification. Use your tools immediately to finish the job."
         )
         
-        # Give this run a unique thread_id so it doesn't mess with the main user chat conversation
-        config = {"configurable": {"thread_id": f"cron_thread_{task_name}"}}
+        # Trigger the agent natively using the shared function
+        thread_id = f"cron_thread_{task_name}"
+        last_msg = trigger_agent(query, thread_id)
         
-        result = agent.invoke(
-            {"messages": [{"role": "user", "content": query}]},
-            config=config
-        )
-        
-        messages = result.get("messages", [])
-        if messages:
-            last_msg = messages[-1].content
-            print(f"\n[{datetime.now()}] ✅ AGENT FINISHED TASK '{task_name}':\n{last_msg}\n")
+        print(f"\n[{datetime.now()}] ✅ AGENT FINISHED TASK '{task_name}':\n{last_msg}\n")
             
     except Exception as e:
         print(f"\n[{datetime.now()}] ❌ ERROR IN AGENT EXECUTION for '{task_name}': {e}\n")

@@ -25,3 +25,10 @@ coverage.xml
 
 # Project specific
 pyrightconfig.json
+
+# Databases
+*.sqlite
+jobs.sqlite
+
+# Generated Output
+*.xlsx
