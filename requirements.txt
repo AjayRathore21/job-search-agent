@@ -5,3 +5,4 @@ langchain-core>=0.3.0
 langchain-google-genai>=2.0.0
 langgraph>=1.0.0
 langgraph-prebuilt>=1.0.0
+cloudinary>=1.36.0

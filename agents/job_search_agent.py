@@ -22,8 +22,8 @@ from tools.scheduler_tool import schedule_cron_job, remove_cron_job, list_cron_j
 
 # 1. Define the state of our graph
 class AgentState(TypedDict):
-    # 'add_messages' ensures new messages are appended, not overwritten
     messages: Annotated[list[BaseMessage], add_messages]
+    user_id: str
 
 
 SYSTEM_PROMPT = (
@@ -32,9 +32,11 @@ SYSTEM_PROMPT = (
     "1. FIRST, use read_resume() to understand the user's background. "
     "2. Based on the resume, search for matching jobs using available tools. "
     "3. Save matching jobs (>= 80% match) to Excel using save_jobs_to_excel. "
+    "   IMPORTANT: Always pass the current session's `user_id` to this tool. "
     "4. Manage background cron jobs: you can schedule, remove, or list them. "
     "Example: 'Schedule a daily scrape at 9 AM' -> use schedule_cron_job."
-    "\nAlways provide a summary of your actions to the user."
+    "\nAlways provide a summary of your actions to the user. "
+    "If you save to excel, show the user the download link from the tool's response."
 )
 
 
@@ -69,9 +71,17 @@ def create_job_search_agent():
     # Define the core logic nodes
     def call_model(state: AgentState):
         messages = state["messages"]
-        # Inject system prompt if not present
+        user_id = state.get("user_id", "default_user")
+        
+        # Inject current context (user_id) and system prompt
+        context_prompt = f"{SYSTEM_PROMPT}\n\nCURRENT CONTEXT:\n- Current session User ID: {user_id}"
+        
         if not any(isinstance(m, HumanMessage) for m in messages) or len(messages) == 1:
-            messages = [HumanMessage(content=SYSTEM_PROMPT)] + messages
+            messages = [HumanMessage(content=context_prompt)] + messages
+        else:
+            # Update system context in case it changed or for visibility
+            messages = [HumanMessage(content=context_prompt)] + messages
+            
         response = llm.invoke(messages)
         return {"messages": [response]}
 
@@ -121,7 +131,10 @@ def trigger_agent(query: str, thread_id: str) -> str:
         
     config = {"configurable": {"thread_id": thread_id}}
     result = _global_agent.invoke(
-        {"messages": [{"role": "user", "content": query}]},
+        {
+            "messages": [{"role": "user", "content": query}],
+            "user_id": thread_id
+        },
         config=config
     )
     
