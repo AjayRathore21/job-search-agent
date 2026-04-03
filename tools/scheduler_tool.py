@@ -1,110 +1,238 @@
 """
 Tool for managing background job scheduling (cron jobs).
-Uses APScheduler with a SQLite job store for persistence.
+Uses APScheduler with MongoDB job store for persistence.
+Also stores schedule metadata in the 'scheduled_jobs' collection.
 """
 
 import os
 import logging
+from datetime import datetime, timezone
 from typing import Optional
-from datetime import datetime
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from langchain_core.tools import tool
 
-# Configure logging
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.mongodb import MongoDBJobStore
+from langchain_core.tools import tool
+from dotenv import load_dotenv
+from pymongo import MongoClient
+
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
-# Define DB path for persistence
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "jobs.sqlite")
+# ─── MongoDB JobStore Setup ────────────────────────────────────────────────────
+_mongo_uri = os.environ.get("MONGODB_URI", "")
 
-# Initialize scheduler
+# Create a shared MongoClient using the full URI (supports mongodb+srv://)
+_mongo_client = MongoClient(_mongo_uri)
+
+# Extract DB name from URI, with a safe fallback
+try:
+    _db_name = _mongo_client.get_default_database().name
+except Exception:
+    _db_name = "job_search_agent"          # fallback if not in URI
+
+# Pass the client instance directly — MongoDBJobStore does NOT accept full URIs in 'host'
 jobstores = {
-    'default': SQLAlchemyJobStore(url=f'sqlite:///{DB_PATH}')
+    "default": MongoDBJobStore(
+        client=_mongo_client,
+        database=_db_name,
+        collection="apscheduler_jobs",
+    )
 }
-scheduler = BackgroundScheduler(jobstores=jobstores)
 
-# Start if not already running
+scheduler = BackgroundScheduler(jobstores=jobstores, timezone="UTC")
+
 if not scheduler.running:
     scheduler.start()
+    logger.info("✅ APScheduler started with MongoDB job store.")
 
-def _dummy_job_func(task_name: str):
-    """Function that the cron job executes to trigger the agent."""
-    # To avoid circular imports, import the agent trigger inside the function
+
+
+# ─── Internal: Write / Update scheduled_jobs metadata in MongoDB ───────────────
+def _upsert_schedule_record(
+    job_id: str,
+    user_id: str,
+    query: str,
+    hour: str,
+    minute: str,
+    status: str,
+    description: str = "",
+):
+    """Write or update a schedule metadata document in 'scheduled_jobs'."""
+    try:
+        from utils.db import get_db
+        db = get_db()
+        db["scheduled_jobs"].update_one(
+            {"job_id": job_id},
+            {
+                "$set": {
+                    "job_id":      job_id,
+                    "user_id":     user_id,
+                    "query":       query,
+                    "hour":        hour,
+                    "minute":      minute,
+                    "description": description,
+                    "status":      status,
+                    "updated_at":  datetime.now(timezone.utc),
+                },
+                "$setOnInsert": {
+                    "created_at": datetime.now(timezone.utc),
+                },
+            },
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"Could not write schedule record to MongoDB: {e}")
+
+
+def _mark_schedule_status(job_id: str, status: str):
+    """Update only the status field on a scheduled_jobs document."""
+    try:
+        from utils.db import get_db
+        db = get_db()
+        db["scheduled_jobs"].update_one(
+            {"job_id": job_id},
+            {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
+        )
+    except Exception as e:
+        logger.warning(f"Could not update schedule status: {e}")
+
+
+# ─── The function APScheduler calls when a job fires ──────────────────────────
+def _run_scheduled_job(job_id: str, user_id: str, query: str):
+    """Executed by APScheduler at the scheduled time."""
     from agents.job_search_agent import trigger_agent
-    
-    print(f"\n[{datetime.now()}] 🔔 SCHEDULER TRIGGERED: Task '{task_name}' started!")
-    print(f"🤖 Booting up the LangGraph Agent to perform the background search...\n")
+
+    logger.info(f"[{datetime.now()}] 🔔 SCHEDULER TRIGGERED: job='{job_id}' user='{user_id}'")
+    _mark_schedule_status(job_id, "running")
 
     try:
-        # Create an automated system prompt for the task
-        query = (
-            f"AUTOMATED JOB: The scheduled background task '{task_name}' has been triggered! "
-            f"Please execute a quick automated job search on LinkedIn for relevant roles and save to Excel. "
-            f"Do not ask the user for clarification. Use your tools immediately to finish the job."
+        full_query = (
+            f"AUTOMATED JOB TRIGGERED for user '{user_id}': {query}. "
+            f"Execute a job search immediately using your tools. "
+            f"Save matching results to Excel and upload to Cloudinary. "
+            f"Do not ask for clarification."
         )
-        
-        # Trigger the agent natively using the shared function
-        thread_id = f"cron_thread_{task_name}"
-        last_msg = trigger_agent(query, thread_id)
-        
-        print(f"\n[{datetime.now()}] ✅ AGENT FINISHED TASK '{task_name}':\n{last_msg}\n")
-            
+        thread_id = f"cron_{user_id}_{job_id}"
+        result = trigger_agent(full_query, thread_id)
+        logger.info(f"✅ Scheduled job '{job_id}' completed for user '{user_id}'.")
+        _mark_schedule_status(job_id, "completed")
+        return result
+
     except Exception as e:
-        print(f"\n[{datetime.now()}] ❌ ERROR IN AGENT EXECUTION for '{task_name}': {e}\n")
+        logger.error(f"❌ Scheduled job '{job_id}' failed: {e}")
+        _mark_schedule_status(job_id, "failed")
+
+
+# ─── LangChain Tools ──────────────────────────────────────────────────────────
 
 @tool
-def schedule_cron_job(task_name: str, hour: str, minute: str = "0", description: str = "") -> str:
+def schedule_cron_job(
+    task_name: str,
+    hour: str,
+    query: str,
+    user_id: str = "default_user",
+    minute: str = "0",
+    description: str = "",
+) -> str:
     """
-    Schedule a recurring job.
-    
+    Schedule a recurring background job search for a user.
+
     Args:
-        task_name: Unique name for the task (e.g. 'daily_linkedin_scrape')
-        hour: Hour in 24h format (0-23)
-        minute: Minute (0-59)
-        description: Brief description of what this job does
+        task_name:   Unique name for this job (e.g. 'daily_search').
+        hour:        Hour in 24h format (0-23) when the job should run.
+        query:       The job search query to run at schedule time.
+        user_id:     The user this schedule belongs to.
+        minute:      Minute (0-59). Defaults to '0'.
+        description: Optional brief description.
     """
     try:
-        # Remove if exists to 'update'
-        if scheduler.get_job(task_name):
-            scheduler.remove_job(task_name)
-            
+        job_id = f"{user_id}__{task_name}"
+
+        # Remove old job if exists (update scenario)
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+
         scheduler.add_job(
-            _dummy_job_func,
-            'cron',
-            args=[task_name],
+            _run_scheduled_job,
+            trigger="cron",
+            args=[job_id, user_id, query],
+            hour=int(hour),
+            minute=int(minute),
+            id=job_id,
+            replace_existing=True,
+            name=description or task_name,
+        )
+
+        # Persist metadata to MongoDB
+        _upsert_schedule_record(
+            job_id=job_id,
+            user_id=user_id,
+            query=query,
             hour=hour,
             minute=minute,
-            id=task_name,
-            replace_existing=True
+            status="active",
+            description=description,
         )
-        return f"Successfully scheduled '{task_name}' for {hour}:{minute} daily."
+
+        return (
+            f"✅ Scheduled '{task_name}' at {hour}:{minute} UTC daily for user '{user_id}'.\n"
+            f"Query: {query}"
+        )
     except Exception as e:
         return f"Error scheduling job: {str(e)}"
 
+
 @tool
-def remove_cron_job(task_name: str) -> str:
+def remove_cron_job(task_name: str, user_id: str = "default_user") -> str:
     """
-    Remove an existing scheduled job by its unique task name.
+    Remove a scheduled background job.
+
+    Args:
+        task_name: The name used when the job was scheduled.
+        user_id:   The owner of this job.
     """
     try:
-        if scheduler.get_job(task_name):
-            scheduler.remove_job(task_name)
-            return f"Successfully removed job '{task_name}'."
+        job_id = f"{user_id}__{task_name}"
+
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+            _mark_schedule_status(job_id, "removed")
+            return f"✅ Removed scheduled job '{task_name}' for user '{user_id}'."
         else:
-            return f"Job '{task_name}' not found."
+            return f"⚠️ Job '{task_name}' not found for user '{user_id}'."
     except Exception as e:
         return f"Error removing job: {str(e)}"
 
+
 @tool
-def list_cron_jobs() -> str:
+def list_cron_jobs(user_id: str = "default_user") -> str:
     """
-    List all currently scheduled background jobs.
+    List all active scheduled jobs for a user (reads from MongoDB metadata).
+
+    Args:
+        user_id: The user whose jobs to list.
     """
-    jobs = scheduler.get_jobs()
-    if not jobs:
-        return "No active scheduled jobs."
-    
-    output = "Current Scheduled Jobs:\n"
-    for job in jobs:
-        output += f"- {job.id}: Next run at {job.next_run_time}\n"
-    return output
+    try:
+        from utils.db import get_db
+        db = get_db()
+        jobs = list(
+            db["scheduled_jobs"].find(
+                {"user_id": user_id, "status": {"$in": ["active", "running", "completed"]}},
+                {"_id": 0}
+            )
+        )
+
+        if not jobs:
+            return f"No active scheduled jobs found for user '{user_id}'."
+
+        output = f"Scheduled Jobs for user '{user_id}':\n"
+        for j in jobs:
+            output += (
+                f"- [{j.get('status','?').upper()}] {j['job_id']} "
+                f"| runs at {j.get('hour','?')}:{j.get('minute','0').zfill(2)} UTC "
+                f"| query: {j.get('query','')[:60]}...\n"
+            )
+        return output
+    except Exception as e:
+        return f"Error listing jobs: {str(e)}"
