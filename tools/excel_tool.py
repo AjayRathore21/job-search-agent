@@ -57,20 +57,17 @@ def save_jobs_to_excel(
     # Build DataFrame
     df = pd.DataFrame(jobs_data)
 
-    if "title" in df.columns:
-        df.rename(columns={"title": "name"}, inplace=True)
+    if 'title' in df.columns:
+        df.rename(columns={'title': 'name'}, inplace=True)
 
-    if "url" in df.columns:
-        df["apply link"] = df["url"].apply(
-            lambda x: f'=HYPERLINK("{x}", "Click here to apply")'
-        )
-        df.drop(columns=["url"], inplace=True)
+    if 'url' in df.columns:
+        df['apply link'] = df['url']
+        df.drop(columns=['url'], inplace=True)
 
-    if "referral_url" in df.columns:
-        df["linkedin referral"] = df["referral_url"].apply(
-            lambda l: f'=HYPERLINK("{l}", "Find Referrals")' if pd.notnull(l) and l != "" else ""
-        )
-        df.drop(columns=["referral_url"], inplace=True)
+    if 'referral_url' in df.columns:
+        df['linkedin referral'] = df['referral_url']
+        df.drop(columns=['referral_url'], inplace=True)
+
 
     # Save locally
     file_path = os.path.abspath(filename)

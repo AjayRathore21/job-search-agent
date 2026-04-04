@@ -59,3 +59,35 @@ def upload_excel_to_cloudinary(file_path: str, user_id: str) -> dict:
 
     except Exception as e:
         return {"error": f"Cloudinary upload failed: {str(e)}"}
+
+
+def delete_excel_from_cloudinary(public_id: str) -> bool:
+    """
+    Deletes an Excel file from Cloudinary by its public ID.
+
+    Args:
+        public_id:   The Cloudinary public ID (e.g. 'job_results/user1/filename_timestamp').
+
+    Returns:
+        True if the file was deleted successfully, False otherwise.
+    """
+    try:
+        init_cloudinary()
+
+        # Excel files are uploaded with resource_type='raw'
+        result = cloudinary.uploader.destroy(
+            public_id,
+            resource_type="raw"
+        )
+
+        # Check the response status
+        if result.get("result") == "ok":
+            return True
+        else:
+            print(f"❌ Cloudinary deletion failed: {result}")
+            return False
+
+    except Exception as e:
+        print(f"❌ Cloudinary deletion error: {e}")
+        return False
+
