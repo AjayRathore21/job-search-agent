@@ -46,6 +46,8 @@ def _ensure_indexes(db: Database):
     try:
         db["excel_results"].create_index([("user_id", 1), ("created_at", -1)])
         db["scheduled_jobs"].create_index([("user_id", 1)])
+        db["user_memory"].create_index([("user_id", 1)], unique=True)
         logger.info("✅ MongoDB indexes ensured.")
     except Exception as e:
         logger.warning(f"Could not ensure indexes: {e}")
+

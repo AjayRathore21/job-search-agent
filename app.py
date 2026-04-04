@@ -19,15 +19,12 @@ from tools.scheduler_tool import scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure scheduler is running when the app starts
-    if not scheduler.running:
-        scheduler.start()
-    print("🚀 FastAPI Server and APScheduler Started!")
+    # API Server startup logic
+    print("🚀 FastAPI API Server Started! (Scheduler handled by separate service)")
     yield
-    # Safely shutdown the scheduler when the app stops
-    print("🛑 Shutting down APScheduler...")
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
+    # API Server shutdown logic
+    print("🛑 API Server is shutting down...")
+
 
 app = FastAPI(title="AI Job Search Agent API", lifespan=lifespan)
 

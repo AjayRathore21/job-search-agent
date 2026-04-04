@@ -42,9 +42,10 @@ jobstores = {
 
 scheduler = BackgroundScheduler(jobstores=jobstores, timezone="UTC")
 
-if not scheduler.running:
-    scheduler.start()
-    logger.info("✅ APScheduler started with MongoDB job store.")
+# NOTE: We do NOT call scheduler.start() here anymore.
+# The API workers (app.py) only use this to add/remove jobs from the MongoDB JobStore.
+# The actual execution loop is started in the standalone 'scheduler_service.py'.
+
 
 
 
