@@ -79,9 +79,16 @@ def save_jobs_to_excel(
     # Upload to Cloudinary
     upload_result = upload_excel_to_cloudinary(file_path, user_id)
 
+    # DELETE the local file immediately after upload attempt
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"🗑️ [CLEANUP] Deleted temporary local file: {file_path}")
+    except Exception as cleanup_err:
+        print(f"⚠️ [CLEANUP] Could not delete {file_path}: {cleanup_err}")
+
     if "error" in upload_result:
         return (
-            f"✅ Saved {len(jobs_data)} jobs locally at: {file_path}\n"
             f"⚠️ Cloudinary upload failed: {upload_result['error']}\n"
             f"📝 MongoDB record NOT saved (no URL available)."
         )
@@ -99,8 +106,9 @@ def save_jobs_to_excel(
     )
 
     return (
-        f"✅ Saved {len(jobs_data)} jobs to Excel.\n"
+        f"✅ Successfully saved {len(jobs_data)} jobs.\n"
         f"☁️ Uploaded to Cloudinary for user '{user_id}'.\n"
         f"📦 Record saved to MongoDB (excel_results).\n"
         f"🔗 Download link: {cloudinary_url}"
     )
+
